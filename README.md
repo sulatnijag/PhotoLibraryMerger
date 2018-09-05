@@ -22,3 +22,13 @@ Merge Apple Photo Libraries
  
  
 ###File Supported
+ - PNG
+ - AVI
+ - CR2
+ - NEF
+ - GIF
+ - PDF
+ - JPEG
+ - MP4
+ - MOV
+ 
