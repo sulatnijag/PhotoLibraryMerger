@@ -1,24 +1,30 @@
 # !/usr/bin/python
 import subprocess, sys, os
-import sqlite3
+#import sqlite3
 import pdb
 from datetime import datetime
 import shutil
 import multiprocessing
+from multiprocessing import Pool
+import timeit
+import logging
 
 
 
 class PLMerger:
     img_src_dir = None
     img_tgt_dir = None
-    conn = None
+    cpu_count = None
+    supported_files = {'PNG', 'AVI', 'CR2', 'NEF', 'GIF', 'PDF', 'JPEG', 'MP4', 'MOV'}
+    #conn = None
 
     def __init__(self, img_tgt_dir, img_src_dir):
         self.img_src_dir = img_src_dir
         self.img_tgt_dir = img_tgt_dir
-        self.conn = sqlite3.connect(os.path.join(self.img_tgt_dir, 'PLM.db'))
+        self.cpu_count = multiprocessing.cpu_count()
+        #self.conn = sqlite3.connect(os.path.join(self.img_tgt_dir, 'PLM.db'))
 
-        self.initSource()
+        #self.initSource()
 
     def getEXIF(self, filename):
         md = dict()
@@ -72,77 +78,99 @@ class PLMerger:
                         )'''
                      )
 
+    def worker(self, f_path):
+        try:
+            f_type, f_name, f_dir, f_size, f_mod, f_ext = self.getEXIF(f_path)
+            f_mod_time = datetime.strptime(f_mod[:19], '%Y:%m:%d %H:%M:%S')
+            year = f_mod_time.strftime('%Y')
+            month = f_mod_time.strftime('%m')
+            day = f_mod_time.strftime('%d')
+
+            if f_type in self.supported_files:
+                tgt_path = os.path.join(self.img_tgt_dir, year, month)
+
+                src_path = f_path
+
+                os.makedirs(tgt_path, exist_ok=True)
+
+                tgt_file_path = os.path.join(tgt_path, f_name)
+
+                if os.path.exists(tgt_file_path):
+                    isConflict, nf_name = self.resolveConflict(src_path, tgt_file_path)
+                    if isConflict:
+                        print('FTYPE: ' + f_type + ' Source ' + src_path + '  renamed to: ' + nf_name)
+                        shutil.copy2(src_path, os.path.join(tgt_path, nf_name))
+                        #self.insertSourceImg(f_type, f_name, f_dir, f_size, f_mod, 1)
+
+                    else:
+                        print('FTYPE: ' + f_type + ' Source ' + src_path + ' is already in : ' + tgt_path)
+                        #self.insertSourceImg(f_type, f_name, f_dir, f_size, f_mod, 0)
+
+                else:
+                    shutil.copy2(src_path, tgt_path)
+                    #self.insertSourceImg(f_type, f_name, f_dir, f_size, f_mod, 2)
+                    print('FTYPE: ' + f_type + ' Source ' + src_path + ' copied to : ' + tgt_path)
+
+        except Exception:
+            print("Unknown image format :" + f_path)
+            pass
+
 
 
 
     def run(self):
+
+        multiprocessing.log_to_stderr()
+        logger = multiprocessing.get_logger()
+        logger.setLevel(logging.WARNING)
+
+
         for src in self.img_src_dir:
             for root, dirs, files in os.walk(src):
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
                 files[:] = [f for f in files if not f.startswith('.')]
 
-                for name in files:
-                    f_type, f_name, f_dir, f_size, f_mod, f_ext = self.getEXIF(os.path.join(root, name))
-                    f_mod_time = datetime.strptime(f_mod[:19], '%Y:%m:%d %H:%M:%S')
-                    year = f_mod_time.strftime('%Y')
-                    month = f_mod_time.strftime('%m')
-                    day = f_mod_time.strftime('%d')
 
-                    tgt_path = os.path.join(self.img_tgt_dir, year, month)
+                f_paths = [os.path.join(root,f) for f in files]
 
-                    src_path = os.path.join(root, name)
-
-                    os.makedirs(tgt_path, exist_ok=True)
-
-                    tgt_file_path = os.path.join(tgt_path, name)
-
-                    if os.path.exists(tgt_file_path):
-                        isConflict, nf_name = self.resolveConflict(src_path, tgt_file_path)
-                        if isConflict:
-                            print('Source ' + src_path + '  renamed to: ' + nf_name)
-                            shutil.copy2(src_path, os.path.join(tgt_path, nf_name))
-                            self.insertSourceImg(f_type, f_name, f_dir, f_size, f_mod, 1)
-
-                        else:
-                            print('Source ' + src_path + ' is already in : ' + tgt_path)
-                            self.insertSourceImg(f_type, f_name, f_dir, f_size, f_mod, 0)
-
-                    else:
-                        shutil.copy2(src_path, tgt_path)
-                        self.insertSourceImg(f_type, f_name, f_dir, f_size, f_mod, 2)
-                        print('Source ' + src_path + ' copied to : ' + tgt_path)
-
-        self.conn.close()
+                with Pool(processes=self.cpu_count) as pool:
+                    pool.map(self.worker, f_paths)
 
 
 
 
-
-
-
-
-
+        #self.conn.close()
+        #print(self.supported_files)
 
 
 
 
 def main():
     print("PhotoLibraryMerger started")
+    start = timeit.default_timer()
 
-    img_src_dir = ['/Volumes/Data/Pictures/Photos Library 2.photoslibrary/Masters/',
-                   '/Volumes/Data/Pictures/Photos Library.photoslibrary/Masters/',
-                   '/Volumes/Data/Pictures/GoPro/']
+
+
+    img_src_dir = ['/Volumes/MAC ESS/Chrise MRI/',
+                   '/Volumes/MAC ESS/Will_Kemp_Acrylic_1/',
+                   '/Volumes/MAC ESS/Will_Kemp_Acrylic_2/',
+                   '/Volumes/MAC ESS/Will_Kemp_Drawing/',
+                   '/Volumes/Data/Pictures/',
+                   '/Users/jag/Pictures/']
+
+    #img_src_dir = ['/Volumes/Data/Pictures/', '/Users/jag/Pictures/']
 
     img_tgt_dir = '/Volumes/MAC ESS/Photos'
 
-    # Test
-    # img_src_dir = ['/Users/jag/git_repo/PhotoLibraryMerger/source_meta_updated/']
-    # img_tgt_dir = '/Users/jag/git_repo/PhotoLibraryMerger/target'
     plm = PLMerger(img_tgt_dir, img_src_dir)
     plm.run()
 
-    print("Program completed")
 
+
+    stop = timeit.default_timer()
+
+    print('Time: ', stop - start)
+    print("Program completed")
 
 
 
